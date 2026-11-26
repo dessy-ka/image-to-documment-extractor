@@ -6,7 +6,6 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
 VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python"
-VENV_UVICORN="$PROJECT_ROOT/.venv/bin/uvicorn"
 
 if [ ! -x "$VENV_PYTHON" ]; then
   bash "$SCRIPT_DIR/install_requirements.sh"
@@ -24,4 +23,4 @@ elif command -v open >/dev/null 2>&1; then
   open "http://127.0.0.1:8000" >/dev/null 2>&1 &
 fi
 
-exec "$VENV_UVICORN" main:app --reload --host 127.0.0.1 --port 8000
+exec "$VENV_PYTHON" -m uvicorn main:app --reload --host 127.0.0.1 --port 8000

@@ -3,7 +3,6 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $ProjectRoot
 
 $venvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-$venvUvicorn = Join-Path $ProjectRoot ".venv\Scripts\uvicorn.exe"
 
 if (-not (Test-Path $venvPython)) {
     & (Join-Path $PSScriptRoot "install_requirements.ps1")
@@ -18,4 +17,4 @@ if (-not (Test-Path $envFile) -and (Test-Path $envExample)) {
 
 Write-Host "Starting Adaptive Batch Image-to-Document Extractor at http://127.0.0.1:8000 ..." -ForegroundColor Green
 Start-Process "http://127.0.0.1:8000"
-& $venvUvicorn main:app --reload --host 127.0.0.1 --port 8000
+& $venvPython -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
