@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adaptive Batch Image-to-Document Extractor</title>
+  <script src="/static/tailwind.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#2563eb',
+              600: '#1d4ed8',
+              700: '#1e40af',
+              900: '#1f4e78',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [contenteditable="true"]:focus {
+      outline: 2px solid #2563eb;
+      outline-offset: -1px;
+      background-color: #eff6ff;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans antialiased">
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-brand-900 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+          AI
+        </div>
+        <div>
+          <h1 class="text-base sm:text-lg font-semibold text-slate-900 leading-tight">
+            Adaptive Batch Image-to-Document Extractor
+          </h1>
+          <p class="text-xs text-slate-500 hidden sm:block">
+            Vision OCR &rarr; Interactive Editor &rarr; Styled Excel (.xlsx) or Word (.docx)
+          </p>
+        </div>
+      </div>
+      <div id="header-badge" class="hidden items-center gap-2">
+        <span id="stage-pill" class="px-2.5 py-1 rounded-full text-xs font-medium bg-brand-50 text-brand-700 border border-brand-100">
+          Stage 2: Review &amp; Edit
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Global Toast Stack -->
+  <div id="toast-container" aria-live="polite" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2.5 max-w-md w-[calc(100vw-2.5rem)] sm:w-full pointer-events-none"></div>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ==================== STAGE 1: QUEUE & UPLOAD ==================== -->
+    <section id="stage-1" class="space-y-6">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-8">
+        <!-- Dropzone -->
+        <div
+          id="dropzone"
+          class="border-2 border-dashed border-slate-300 rounded-xl p-8 sm:p-10 text-center transition-colors cursor-pointer hover:border-brand-500 hover:bg-brand-50/40"
+        >
+          <div class="mx-auto w-12 h-12 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center mb-3">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <p class="text-base font-medium text-slate-800">
+            Drag &amp; drop document photos here, or click to browse
+          </p>
+          <p class="text-xs sm:text-sm text-slate-500 mt-1">
+            Up to 15 images per batch. Large photos are automatically resized &amp; compressed client-side.
+          </p>
+          <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
+            <label class="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium cursor-pointer shadow-sm transition">
+              <span>Select Images</span>
+              <input id="file-input" type="file" accept="image/*" multiple class="hidden" />
+            </label>
+            <label class="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm font-medium cursor-pointer border border-slate-300 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span>Add Camera Photo</span>
+              <input id="camera-input" type="file" accept="image/*" capture="environment" class="hidden" />
+            </label>
+          </div>
+        </div>
+
+        <!-- Queue Strip -->
+        <div id="queue-container" class="hidden mt-6">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-slate-700">
+              Queued Pages (<span id="queue-count">0</span> / 15)
+            </h2>
+            <button onclick="clearQueue()" class="text-xs text-red-600 hover:text-red-700 font-medium">
+              Clear All
+            </button>
+          </div>
+          <div id="thumbnail-strip" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3"></div>
+        </div>
+
+        <!-- Mode Toggle & Extract CTA -->
+        <div class="mt-6 pt-6 border-t border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <span class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+              Output Format Mode
+            </span>
+            <div class="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200" role="group">
+              <button type="button" data-mode="auto" onclick="setMode('auto')" class="mode-btn px-3.5 py-2 text-xs sm:text-sm font-medium rounded-lg transition bg-white text-slate-900 shadow-sm">
+                Auto-Detect
+              </button>
+              <button type="button" data-mode="excel" onclick="setMode('excel')" class="mode-btn px-3.5 py-2 text-xs sm:text-sm font-medium rounded-lg transition text-slate-600 hover:text-slate-900">
+                Force Excel (.xlsx)
+              </button>
+              <button type="button" data-mode="word" onclick="setMode('word')" class="mode-btn px-3.5 py-2 text-xs sm:text-sm font-medium rounded-lg transition text-slate-600 hover:text-slate-900">
+                Force Word (.docx)
+              </button>
+            </div>
+          </div>
+
+          <button
+            id="extract-btn"
+            onclick="runExtraction()"
+            disabled
+            class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-brand-900 hover:bg-brand-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold text-sm shadow-sm transition"
+          >
+            <svg id="extract-spinner" class="hidden animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+            </svg>
+            <span id="extract-btn-label">Extract &amp; Preview (0)</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== STAGE 2 & 3: PREVIEW, EDIT & EXPORT ==================== -->
+    <section id="stage-2" class="hidden space-y-5">
+
+      <!-- Partial Failure Banner -->
+      <div id="failed-banner" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-4 shadow-sm">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1">
+            <h3 class="text-sm font-semibold text-amber-900">
+              Some pages could not be extracted
+            </h3>
+            <p class="text-xs text-amber-800 mt-0.5">
+              You can dismiss this warning and export the successful pages, or replace a failed page to re-extract it in place.
+            </p>
+            <ul id="failed-list" class="mt-3 space-y-2"></ul>
+          </div>
+          <button onclick="dismissFailedBanner()" class="text-xs font-semibold text-amber-900 hover:underline shrink-0">
+            Dismiss
+          </button>
+        </div>
+      </div>
+
+      <!-- Top Action Bar (Filename + Export + Start Over) -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <label for="filename-input" class="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Filename
+          </label>
+          <div class="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white focus-within:ring-2 focus-within:ring-brand-500">
+            <input
+              id="filename-input"
+              type="text"
+              oninput="updateFilename(this.value)"
+              class="px-3 py-1.5 text-sm font-medium text-slate-900 focus:outline-none w-48 sm:w-64"
+            />
+            <span id="ext-badge" class="px-2.5 py-1.5 bg-slate-100 border-l border-slate-300 text-xs font-semibold text-slate-700">
+              .xlsx
+            </span>
+          </div>
+          <span id="pages-processed-badge" class="text-xs text-slate-500"></span>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            onclick="startOver()"
+            class="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium transition"
+          >
+            Start Over
+          </button>
+          <button
+            id="export-btn"
+            onclick="exportDocument()"
+            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-sm transition"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            <span id="export-btn-label">Download Excel (.xlsx)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Mobile Tab Switcher -->
+      <div class="lg:hidden flex rounded-xl bg-slate-200 p-1">
+        <button id="mob-tab-editor" onclick="setMobileTab('editor')" class="flex-1 py-2 text-xs font-semibold rounded-lg bg-white text-slate-900 shadow-sm">
+          Extracted Document
+        </button>
+        <button id="mob-tab-image" onclick="setMobileTab('image')" class="flex-1 py-2 text-xs font-semibold rounded-lg text-slate-600">
+          Original Image
+        </button>
+      </div>
+
+      <!-- Split View Workspace -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <!-- Reference Image Viewer (Left on Desktop) -->
+        <div id="viewer-pane" class="hidden lg:block lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sticky top-20">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-800">Original Reference Image</h3>
+            <div class="flex items-center gap-1.5">
+              <button onclick="prevRefPage()" class="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-100">&larr;</button>
+              <span id="ref-page-label" class="text-xs font-medium text-slate-600 px-1">1 / 1</span>
+              <button onclick="nextRefPage()" class="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-100">&rarr;</button>
+            </div>
+          </div>
+          <div class="bg-slate-100 rounded-xl border border-slate-200 overflow-hidden flex items-center justify-center min-h-[320px] max-h-[70vh]">
+            <img id="ref-image" src="" alt="Reference page" class="max-w-full max-h-[68vh] object-contain" />
+          </div>
+          <p id="ref-filename" class="text-xs text-slate-500 mt-2 truncate text-center"></p>
+        </div>
+
+        <!-- Interactive Editor (Right on Desktop) -->
+        <div id="editor-pane" class="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6">
+          <div id="excel-editor" class="hidden space-y-4"></div>
+          <div id="word-editor" class="hidden space-y-6"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // -----------------------------------------------------------------------
+    // Application State
+    // -----------------------------------------------------------------------
+    const MAX_BATCH = 15;
+    const MAX_EDGE = 1600;
+    const JPEG_QUALITY = 0.85;
+
+    let queue = []; // Array of { id, name, blob, previewUrl }
+    let selectedMode = 'auto';
+    let currentPayload = null;
+    let activeSheetIdx = 0;
+    let refPageIdx = 0;
+    let mobileTab = 'editor';
+
+    // -----------------------------------------------------------------------
+    // Client-Side Image Compression
+    // -----------------------------------------------------------------------
+    function compressImage(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          let { width, height } = img;
+          const longest = Math.max(width, height);
+          if (longest > MAX_EDGE) {
+            const scale = MAX_EDGE / longest;
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) return reject(new Error('Canvas compression failed.'));
+              const baseName = file.name.replace(/\.[^.]+$/, '') || 'page';
+              resolve({
+                id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+                name: `${baseName}.jpg`,
+                blob,
+                previewUrl: URL.createObjectURL(blob),
+              });
+            },
+            'image/jpeg',
+            JPEG_QUALITY
+          );
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error(`Could not read image "${file.name}".`));
+        };
+        img.src = objectUrl;
+      });
+    }
+
+    async function handleFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+
+      const remaining = MAX_BATCH - queue.length;
+      if (remaining <= 0) {
+        showError(`Maximum batch size of ${MAX_BATCH} images reached.`);
+        return;
+      }
+
+      const slice = files.slice(0, remaining);
+      if (files.length > remaining) {
+        showError(`Only added ${remaining} image(s) to stay within the ${MAX_BATCH}-image limit.`);
+      }
+
+      for (const f of slice) {
+        try {
+          const item = await compressImage(f);
+          queue.push(item);
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+      renderQueue();
+    }
+
+    // Drag & drop + file inputs
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const cameraInput = document.getElementById('camera-input');
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('border-brand-500', 'bg-brand-50/60');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('border-brand-500', 'bg-brand-50/60');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('border-brand-500', 'bg-brand-50/60');
+      handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+      e.target.value = '';
+    });
+    cameraInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+      e.target.value = '';
+    });
+
+    // -----------------------------------------------------------------------
+    // Queue Rendering & Controls
+    // -----------------------------------------------------------------------
+    function renderQueue() {
+      const container = document.getElementById('queue-container');
+      const strip = document.getElementById('thumbnail-strip');
+      const countEl = document.getElementById('queue-count');
+      const btn = document.getElementById('extract-btn');
+      const label = document.getElementById('extract-btn-label');
+
+      countEl.textContent = queue.length;
+      label.textContent = `Extract & Preview (${queue.length})`;
+      btn.disabled = queue.length === 0;
+
+      if (queue.length === 0) {
+        container.classList.add('hidden');
+        strip.innerHTML = '';
+        return;
+      }
+
+      container.classList.remove('hidden');
+      strip.innerHTML = queue
+        .map(
+          (item, idx) => `
+          <div class="group relative bg-slate-50 border border-slate-200 rounded-xl p-2 flex flex-col gap-1.5">
+            <div class="relative aspect-[3/4] rounded-lg overflow-hidden bg-slate-200">
+              <img src="${item.previewUrl}" alt="Page ${idx + 1}" class="w-full h-full object-cover" />
+              <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-900/75 text-white text-[10px] font-semibold">
+                #${idx + 1}
+              </span>
+              <button
+                onclick="removeQueueItem(${idx})"
+                title="Remove page"
+                class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-600/90 hover:bg-red-700 text-white text-xs font-bold flex items-center justify-center shadow"
+              >&times;</button>
+            </div>
+            <div class="flex items-center justify-between gap-1">
+              <button
+                onclick="moveQueueItem(${idx}, -1)"
+                ${idx === 0 ? 'disabled' : ''}
+                class="flex-1 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-30 text-xs font-semibold"
+                title="Move left"
+              >&larr;</button>
+              <button
+                onclick="moveQueueItem(${idx}, 1)"
+                ${idx === queue.length - 1 ? 'disabled' : ''}
+                class="flex-1 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-30 text-xs font-semibold"
+                title="Move right"
+              >&rarr;</button>
+            </div>
+          </div>`
+        )
+        .join('');
+    }
+
+    function removeQueueItem(idx) {
+      const removed = queue.splice(idx, 1)[0];
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      renderQueue();
+    }
+
+    function moveQueueItem(idx, delta) {
+      const target = idx + delta;
+      if (target < 0 || target >= queue.length) return;
+      [queue[idx], queue[target]] = [queue[target], queue[idx]];
+      renderQueue();
+    }
+
+    function clearQueue() {
+      queue.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+      queue = [];
+      renderQueue();
+    }
+
+    function setMode(mode) {
+      selectedMode = mode;
+      document.querySelectorAll('.mode-btn').forEach((btn) => {
+        const active = btn.dataset.mode === mode;
+        btn.className = active
+          ? 'mode-btn px-3.5 py-2 text-xs sm:text-sm font-medium rounded-lg transition bg-white text-slate-900 shadow-sm'
+          : 'mode-btn px-3.5 py-2 text-xs sm:text-sm font-medium rounded-lg transition text-slate-600 hover:text-slate-900';
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // Extraction API Call
+    // -----------------------------------------------------------------------
+    async function runExtraction() {
+      if (!queue.length) return;
+      const btn = document.getElementById('extract-btn');
+      const spinner = document.getElementById('extract-spinner');
+      const label = document.getElementById('extract-btn-label');
+
+      btn.disabled = true;
+      spinner.classList.remove('hidden');
+      label.textContent = 'Extracting with Gemini Vision...';
+
+      try {
+        const formData = new FormData();
+        queue.forEach((item) => formData.append('files', item.blob, item.name));
+        formData.append('mode', selectedMode);
+
+        const res = await fetch('/extract', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) {
+          let msg = 'Extraction failed.';
+          if (typeof data.detail === 'string') {
+            msg = data.detail;
+          } else if (data.detail?.failed_pages?.length) {
+            const reasons = data.detail.failed_pages
+              .map((p) => `Page ${p.page_index + 1} (${p.filename}): ${p.reason}`)
+              .join(' | ');
+            msg = `${data.detail.message || 'Extraction failed.'} — ${reasons}`;
+          } else if (data.detail?.message) {
+            msg = data.detail.message;
+          }
+          throw new Error(msg);
+        }
+
+        currentPayload = data;
+        activeSheetIdx = 0;
+        refPageIdx = 0;
+        enterStage2();
+        showToast(
+          `Extracted ${data.pages_processed} page(s) into ${data.output_format === 'excel' ? 'Excel' : 'Word'} preview.`,
+          'success',
+          'Extraction Complete'
+        );
+      } catch (err) {
+        showError(err.message || 'An unexpected error occurred.');
+      } finally {
+        btn.disabled = queue.length === 0;
+        spinner.classList.add('hidden');
+        label.textContent = `Extract & Preview (${queue.length})`;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stage 2: Preview & Interactive Editing
+    // -----------------------------------------------------------------------
+    function enterStage2() {
+      document.getElementById('stage-1').classList.add('hidden');
+      document.getElementById('stage-2').classList.remove('hidden');
+      document.getElementById('header-badge').classList.remove('hidden');
+      document.getElementById('header-badge').classList.add('flex');
+
+      const isExcel = currentPayload.output_format === 'excel';
+      document.getElementById('filename-input').value = currentPayload.filename || 'extracted_document';
+      document.getElementById('ext-badge').textContent = isExcel ? '.xlsx' : '.docx';
+      document.getElementById('export-btn-label').textContent = isExcel
+        ? 'Download Excel (.xlsx)'
+        : 'Download Word (.docx)';
+      document.getElementById('pages-processed-badge').textContent =
+        `${currentPayload.pages_processed} page(s) extracted`;
+
+      renderFailedBanner();
+      renderReferenceImage();
+      renderEditor();
+    }
+
+    function renderFailedBanner() {
+      const banner = document.getElementById('failed-banner');
+      const list = document.getElementById('failed-list');
+      const failed = currentPayload?.failed_pages || [];
+
+      if (!failed.length) {
+        banner.classList.add('hidden');
+        list.innerHTML = '';
+        return;
+      }
+
+      banner.classList.remove('hidden');
+      list.innerHTML = failed
+        .map(
+          (err, i) => `
+          <li class="flex flex-wrap items-center justify-between gap-2 bg-white/80 border border-amber-200 rounded-lg px-3 py-2 text-xs">
+            <div>
+              <span class="font-semibold text-amber-950">Page ${err.page_index + 1} (${escapeHtml(err.filename)}):</span>
+              <span class="text-amber-800">${escapeHtml(err.reason)}</span>
+            </div>
+            <label class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-medium cursor-pointer transition">
+              Replace &amp; Re-Extract
+              <input type="file" accept="image/*" class="hidden" onchange="replaceFailedPage(${err.page_index}, ${i}, this)" />
+            </label>
+          </li>`
+        )
+        .join('');
+    }
+
+    function dismissFailedBanner() {
+      document.getElementById('failed-banner').classList.add('hidden');
+    }
+
+    async function replaceFailedPage(pageIndex, failedArrIdx, inputEl) {
+      const file = inputEl.files?.[0];
+      if (!file) return;
+      try {
+        const item = await compressImage(file);
+        const formData = new FormData();
+        formData.append('files', item.blob, item.name);
+        formData.append('mode', currentPayload.output_format);
+
+        const res = await fetch('/extract', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Re-extraction failed.');
+        }
+
+        // Update queue reference image at pageIndex
+        if (queue[pageIndex]?.previewUrl) URL.revokeObjectURL(queue[pageIndex].previewUrl);
+        queue[pageIndex] = item;
+
+        if (currentPayload.output_format === 'excel' && data.sheets?.length) {
+          currentPayload.sheets = currentPayload.sheets || [];
+          currentPayload.sheets.push(...data.sheets);
+        } else if (currentPayload.output_format === 'word' && data.pages?.length) {
+          currentPayload.pages = currentPayload.pages || [];
+          currentPayload.pages.push(...data.pages);
+        }
+
+        currentPayload.pages_processed += data.pages_processed;
+        currentPayload.failed_pages.splice(failedArrIdx, 1);
+
+        document.getElementById('pages-processed-badge').textContent =
+          `${currentPayload.pages_processed} page(s) extracted`;
+        renderFailedBanner();
+        renderReferenceImage();
+        renderEditor();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    function renderReferenceImage() {
+      if (!queue.length) return;
+      refPageIdx = Math.max(0, Math.min(refPageIdx, queue.length - 1));
+      const item = queue[refPageIdx];
+      document.getElementById('ref-image').src = item.previewUrl;
+      document.getElementById('ref-filename').textContent = item.name;
+      document.getElementById('ref-page-label').textContent = `${refPageIdx + 1} / ${queue.length}`;
+    }
+
+    function prevRefPage() {
+      if (refPageIdx > 0) {
+        refPageIdx--;
+        renderReferenceImage();
+      }
+    }
+
+    function nextRefPage() {
+      if (refPageIdx < queue.length - 1) {
+        refPageIdx++;
+        renderReferenceImage();
+      }
+    }
+
+    function setMobileTab(tab) {
+      mobileTab = tab;
+      const viewer = document.getElementById('viewer-pane');
+      const editor = document.getElementById('editor-pane');
+      const tabEd = document.getElementById('mob-tab-editor');
+      const tabIm = document.getElementById('mob-tab-image');
+
+      if (tab === 'image') {
+        viewer.classList.remove('hidden');
+        editor.classList.add('hidden', 'lg:block');
+        tabIm.className = 'flex-1 py-2 text-xs font-semibold rounded-lg bg-white text-slate-900 shadow-sm';
+        tabEd.className = 'flex-1 py-2 text-xs font-semibold rounded-lg text-slate-600';
+      } else {
+        viewer.classList.add('hidden', 'lg:block');
+        editor.classList.remove('hidden');
+        tabEd.className = 'flex-1 py-2 text-xs font-semibold rounded-lg bg-white text-slate-900 shadow-sm';
+        tabIm.className = 'flex-1 py-2 text-xs font-semibold rounded-lg text-slate-600';
+      }
+    }
+
+    function updateFilename(val) {
+      if (currentPayload) currentPayload.filename = val;
+    }
+
+    function renderEditor() {
+      const excelEl = document.getElementById('excel-editor');
+      const wordEl = document.getElementById('word-editor');
+
+      if (currentPayload.output_format === 'excel') {
+        wordEl.classList.add('hidden');
+        excelEl.classList.remove('hidden');
+        renderExcelEditor();
+      } else {
+        excelEl.classList.add('hidden');
+        wordEl.classList.remove('hidden');
+        renderWordEditor();
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Excel Editor
+    // -----------------------------------------------------------------------
+    function renderExcelEditor() {
+      const container = document.getElementById('excel-editor');
+      const sheets = currentPayload.sheets || [];
+      if (!sheets.length) {
+        container.innerHTML = '<p class="text-sm text-slate-500">No sheets available.</p>';
+        return;
+      }
+      activeSheetIdx = Math.max(0, Math.min(activeSheetIdx, sheets.length - 1));
+      const sheet = sheets[activeSheetIdx];
+
+      const tabsHtml =
+        sheets.length > 1
+          ? `<div class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-3">
+              ${sheets
+                .map(
+                  (s, i) => `
+                  <button
+                    onclick="switchSheet(${i})"
+                    class="px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      i === activeSheetIdx
+                        ? 'bg-brand-900 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }"
+                  >${escapeHtml(s.sheet_name)}</button>`
+                )
+                .join('')}
+            </div>`
+          : '';
+
+      const headerCells = sheet.headers
+        .map(
+          (h, cIdx) => `
+          <th
+            contenteditable="true"
+            oninput="updateExcelHeader(${cIdx}, this.innerText)"
+            class="px-3 py-2.5 text-left text-xs font-semibold text-white bg-brand-900 border border-brand-700 min-w-[110px]"
+          >${escapeHtml(h)}</th>`
+        )
+        .join('');
+
+      const bodyRows = sheet.rows
+        .map(
+          (row, rIdx) => `
+          <tr class="hover:bg-slate-50">
+            ${sheet.headers
+              .map(
+                (_, cIdx) => `
+                <td
+                  contenteditable="true"
+                  oninput="updateExcelCell(${rIdx}, ${cIdx}, this.innerText)"
+                  class="px-3 py-2 text-xs sm:text-sm text-slate-800 border border-slate-200"
+                >${escapeHtml(row[cIdx] ?? '')}</td>`
+              )
+              .join('')}
+            <td class="px-2 py-2 border border-slate-200 text-center w-10">
+              <button
+                onclick="deleteExcelRow(${rIdx})"
+                title="Delete row"
+                class="text-red-500 hover:text-red-700 font-bold text-sm"
+              >&times;</button>
+            </td>
+          </tr>`
+        )
+        .join('');
+
+      container.innerHTML = `
+        ${tabsHtml}
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs text-slate-500">Click any header or cell to edit directly.</span>
+          <div class="flex items-center gap-2">
+            <button onclick="addExcelColumn()" class="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-xs font-medium text-slate-700">
+              + Add Column
+            </button>
+            <button onclick="addExcelRow()" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-xs font-medium text-white">
+              + Add Row
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-slate-200">
+          <table class="w-full border-collapse">
+            <thead>
+              <tr>
+                ${headerCells}
+                <th class="px-2 py-2.5 bg-brand-900 border border-brand-700 text-white text-xs w-10"></th>
+              </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function switchSheet(idx) {
+      activeSheetIdx = idx;
+      renderExcelEditor();
+    }
+    function updateExcelHeader(cIdx, val) {
+      currentPayload.sheets[activeSheetIdx].headers[cIdx] = val;
+    }
+    function updateExcelCell(rIdx, cIdx, val) {
+      currentPayload.sheets[activeSheetIdx].rows[rIdx][cIdx] = val;
+    }
+    function addExcelRow() {
+      const sheet = currentPayload.sheets[activeSheetIdx];
+      sheet.rows.push(new Array(sheet.headers.length).fill(''));
+      renderExcelEditor();
+    }
+    function deleteExcelRow(rIdx) {
+      currentPayload.sheets[activeSheetIdx].rows.splice(rIdx, 1);
+      renderExcelEditor();
+    }
+    function addExcelColumn() {
+      const sheet = currentPayload.sheets[activeSheetIdx];
+      sheet.headers.push(`Column_${sheet.headers.length + 1}`);
+      sheet.rows.forEach((r) => r.push(''));
+      renderExcelEditor();
+    }
+
+    // -----------------------------------------------------------------------
+    // Word Editor
+    // -----------------------------------------------------------------------
+    function renderWordEditor() {
+      const container = document.getElementById('word-editor');
+      const pages = currentPayload.pages || [];
+      if (!pages.length) {
+        container.innerHTML = '<p class="text-sm text-slate-500">No pages available.</p>';
+        return;
+      }
+
+      container.innerHTML = pages
+        .map((blocks, pIdx) => {
+          const blocksHtml = blocks
+            .map((b, bIdx) => renderWordBlock(pIdx, bIdx, b))
+            .join('');
+          return `
+            <div class="border border-slate-200 rounded-xl p-4 sm:p-6 bg-white shadow-sm space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Page ${pIdx + 1}</span>
+                <button
+                  onclick="addWordParagraph(${pIdx})"
+                  class="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-xs font-medium text-slate-700"
+                >+ Add Paragraph</button>
+              </div>
+              <div class="space-y-3">${blocksHtml}</div>
+            </div>
+          `;
+        })
+        .join('');
+    }
+
+    function renderWordBlock(pIdx, bIdx, block) {
+      if (block.kind === 'single') {
+        const alignClass =
+          block.alignment === 'center'
+            ? 'text-center'
+            : block.alignment === 'right'
+            ? 'text-right'
+            : 'text-left';
+        const boldClass = block.is_bold ? 'font-bold' : 'font-normal';
+        return `
+          <div class="group border border-transparent hover:border-slate-200 rounded-lg p-2 transition">
+            <div class="flex items-center justify-end gap-1 mb-1 opacity-80 group-hover:opacity-100">
+              ${['left', 'center', 'right']
+                .map(
+                  (a) => `
+                  <button
+                    onclick="setWordAlign(${pIdx}, ${bIdx}, '${a}')"
+                    class="px-2 py-0.5 text-[11px] rounded border ${
+                      block.alignment === a
+                        ? 'bg-brand-600 text-white border-brand-600'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }"
+                  >${a[0].toUpperCase()}</button>`
+                )
+                .join('')}
+              <button
+                onclick="toggleWordBold(${pIdx}, ${bIdx})"
+                class="px-2 py-0.5 text-[11px] font-bold rounded border ${
+                  block.is_bold
+                    ? 'bg-slate-800 text-white border-slate-800'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                }"
+              >B</button>
+              <button
+                onclick="deleteWordBlock(${pIdx}, ${bIdx})"
+                class="px-2 py-0.5 text-[11px] rounded border border-red-200 text-red-600 hover:bg-red-50"
+              >&times;</button>
+            </div>
+            <div
+              contenteditable="true"
+              oninput="updateWordText(${pIdx}, ${bIdx}, this.innerText)"
+              class="p-2 rounded border border-slate-200 text-sm text-slate-800 whitespace-pre-wrap ${alignClass} ${boldClass}"
+            >${escapeHtml(block.text)}</div>
+          </div>
+        `;
+      }
+
+      if (block.kind === 'split_row') {
+        return `
+          <div class="border border-slate-200 rounded-lg p-2.5 bg-slate-50/50 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Split Row (Left / Right)</span>
+              <button onclick="deleteWordBlock(${pIdx}, ${bIdx})" class="text-xs text-red-500 hover:text-red-700 font-bold">&times;</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                type="text"
+                value="${escapeAttr(block.left_text)}"
+                oninput="updateSplitRow(${pIdx}, ${bIdx}, 'left_text', this.value)"
+                class="px-2.5 py-1.5 text-sm border border-slate-200 rounded bg-white text-left"
+              />
+              <input
+                type="text"
+                value="${escapeAttr(block.right_text)}"
+                oninput="updateSplitRow(${pIdx}, ${bIdx}, 'right_text', this.value)"
+                class="px-2.5 py-1.5 text-sm border border-slate-200 rounded bg-white sm:text-right"
+              />
+            </div>
+          </div>
+        `;
+      }
+
+      // Embedded table
+      const headers = block.table_headers || [];
+      const rows = block.table_rows || [];
+      const cols = Math.max(headers.length, ...rows.map((r) => r.length), 1);
+      return `
+        <div class="border border-slate-200 rounded-lg p-3 bg-slate-50/50 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Embedded Table</span>
+            <div class="flex items-center gap-2">
+              <button onclick="addWordTableRow(${pIdx}, ${bIdx})" class="px-2 py-0.5 text-[11px] rounded bg-brand-600 text-white">+ Row</button>
+              <button onclick="deleteWordBlock(${pIdx}, ${bIdx})" class="text-xs text-red-500 hover:text-red-700 font-bold">&times;</button>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full border-collapse bg-white text-xs">
+              <thead>
+                <tr>
+                  ${Array.from({ length: cols })
+                    .map(
+                      (_, cIdx) => `
+                      <th
+                        contenteditable="true"
+                        oninput="updateWordTableHeader(${pIdx}, ${bIdx}, ${cIdx}, this.innerText)"
+                        class="px-2.5 py-1.5 border border-slate-300 bg-slate-100 text-left font-semibold"
+                      >${escapeHtml(headers[cIdx] ?? '')}</th>`
+                    )
+                    .join('')}
+                  <th class="w-8 border border-slate-300 bg-slate-100"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows
+                  .map(
+                    (row, rIdx) => `
+                    <tr>
+                      ${Array.from({ length: cols })
+                        .map(
+                          (_, cIdx) => `
+                          <td
+                            contenteditable="true"
+                            oninput="updateWordTableCell(${pIdx}, ${bIdx}, ${rIdx}, ${cIdx}, this.innerText)"
+                            class="px-2.5 py-1.5 border border-slate-200"
+                          >${escapeHtml(row[cIdx] ?? '')}</td>`
+                        )
+                        .join('')}
+                      <td class="border border-slate-200 text-center">
+                        <button onclick="deleteWordTableRow(${pIdx}, ${bIdx}, ${rIdx})" class="text-red-500 font-bold">&times;</button>
+                      </td>
+                    </tr>`
+                  )
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function updateWordText(pIdx, bIdx, val) {
+      currentPayload.pages[pIdx][bIdx].text = val;
+    }
+    function setWordAlign(pIdx, bIdx, align) {
+      currentPayload.pages[pIdx][bIdx].alignment = align;
+      renderWordEditor();
+    }
+    function toggleWordBold(pIdx, bIdx) {
+      currentPayload.pages[pIdx][bIdx].is_bold = !currentPayload.pages[pIdx][bIdx].is_bold;
+      renderWordEditor();
+    }
+    function deleteWordBlock(pIdx, bIdx) {
+      currentPayload.pages[pIdx].splice(bIdx, 1);
+      renderWordEditor();
+    }
+    function addWordParagraph(pIdx) {
+      currentPayload.pages[pIdx].push({
+        kind: 'single',
+        text: '',
+        alignment: 'left',
+        is_bold: false,
+        left_text: '',
+        right_text: '',
+        table_headers: [],
+        table_rows: [],
+      });
+      renderWordEditor();
+    }
+    function updateSplitRow(pIdx, bIdx, field, val) {
+      currentPayload.pages[pIdx][bIdx][field] = val;
+    }
+    function updateWordTableHeader(pIdx, bIdx, cIdx, val) {
+      currentPayload.pages[pIdx][bIdx].table_headers[cIdx] = val;
+    }
+    function updateWordTableCell(pIdx, bIdx, rIdx, cIdx, val) {
+      currentPayload.pages[pIdx][bIdx].table_rows[rIdx][cIdx] = val;
+    }
+    function addWordTableRow(pIdx, bIdx) {
+      const b = currentPayload.pages[pIdx][bIdx];
+      const cols = Math.max(b.table_headers?.length || 0, 1);
+      b.table_rows.push(new Array(cols).fill(''));
+      renderWordEditor();
+    }
+    function deleteWordTableRow(pIdx, bIdx, rIdx) {
+      currentPayload.pages[pIdx][bIdx].table_rows.splice(rIdx, 1);
+      renderWordEditor();
+    }
+
+    // -----------------------------------------------------------------------
+    // Stage 3: Export & Reset
+    // -----------------------------------------------------------------------
+    async function exportDocument() {
+      if (!currentPayload) return;
+      const btn = document.getElementById('export-btn');
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(currentPayload),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Export failed.');
+        }
+
+        const blob = await res.blob();
+        const ext = currentPayload.output_format === 'excel' ? 'xlsx' : 'docx';
+        const safeName = (currentPayload.filename || 'extracted_document').trim() || 'extracted_document';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${safeName}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast(`Downloaded ${safeName}.${ext}`, 'success', 'Export Ready');
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function startOver() {
+      clearQueue();
+      currentPayload = null;
+      activeSheetIdx = 0;
+      refPageIdx = 0;
+      document.getElementById('stage-2').classList.add('hidden');
+      document.getElementById('stage-1').classList.remove('hidden');
+      document.getElementById('header-badge').classList.add('hidden');
+    }
+
+    // -----------------------------------------------------------------------
+    // Utilities & Toasts
+    // -----------------------------------------------------------------------
+    function showToast(msg, type = 'error', title = '') {
+      const container = document.getElementById('toast-container');
+      const styles = {
+        error: {
+          wrap: 'bg-white border-l-4 border-red-600 text-slate-800',
+          badge: 'bg-red-100 text-red-700',
+          icon: '!',
+          defaultTitle: 'Something went wrong',
+        },
+        success: {
+          wrap: 'bg-white border-l-4 border-emerald-600 text-slate-800',
+          badge: 'bg-emerald-100 text-emerald-700',
+          icon: '&#10003;',
+          defaultTitle: 'Success',
+        },
+        info: {
+          wrap: 'bg-white border-l-4 border-brand-600 text-slate-800',
+          badge: 'bg-brand-100 text-brand-700',
+          icon: 'i',
+          defaultTitle: 'Notice',
+        },
+      }[type] || {
+        wrap: 'bg-white border-l-4 border-slate-600 text-slate-800',
+        badge: 'bg-slate-100 text-slate-700',
+        icon: 'i',
+        defaultTitle: 'Notice',
+      };
+
+      const toast = document.createElement('div');
+      toast.className = `pointer-events-auto rounded-xl border border-slate-200 shadow-lg p-3.5 flex items-start gap-3 transition-all duration-200 ${styles.wrap}`;
+      toast.innerHTML = `
+        <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 ${styles.badge}">${styles.icon}</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-semibold text-slate-900">${escapeHtml(title || styles.defaultTitle)}</p>
+          <p class="text-xs text-slate-600 mt-0.5 max-h-32 overflow-y-auto break-words leading-relaxed">${escapeHtml(msg)}</p>
+        </div>
+        <button type="button" aria-label="Dismiss" class="text-slate-400 hover:text-slate-700 text-base leading-none font-semibold px-1">&times;</button>
+      `;
+
+      const duration = type === 'error' ? 12000 : 4500;
+      let timer = setTimeout(() => dismissToast(toast), duration);
+
+      toast.addEventListener('mouseenter', () => clearTimeout(timer));
+      toast.addEventListener('mouseleave', () => {
+        timer = setTimeout(() => dismissToast(toast), 3000);
+      });
+      toast.querySelector('button').addEventListener('click', () => {
+        clearTimeout(timer);
+        dismissToast(toast);
+      });
+
+      container.appendChild(toast);
+      while (container.children.length > 4) {
+        container.firstElementChild.remove();
+      }
+    }
+    function dismissToast(el) {
+      if (!el || !el.parentNode) return;
+      el.classList.add('opacity-0', 'translate-y-1');
+      setTimeout(() => el.remove(), 180);
+    }
+    function showError(msg) {
+      showToast(msg, 'error');
+    }
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    function escapeAttr(str) {
+      return escapeHtml(str).replace(/'/g, '&#39;');
+    }
+  </script>
+</body>
+</html>
